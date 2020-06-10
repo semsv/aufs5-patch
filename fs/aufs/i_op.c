@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2017 Junjiro R. Okajima
+ * Copyright (C) 2005-2019 Junjiro R. Okajima
  *
  * This program, aufs is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,6 +22,7 @@
 
 #include <linux/device_cgroup.h>
 #include <linux/fs_stack.h>
+#include <linux/iversion.h>
 #include <linux/namei.h>
 #include <linux/security.h>
 #include "aufs.h"
@@ -39,14 +41,14 @@ static int h_permission(struct inode *h_inode, int mask,
 	if (((mask & MAY_EXEC)
 	     && S_ISREG(h_inode->i_mode)
 	     && (path_noexec(h_path)
-		 || !(h_inode->i_mode & S_IXUGO))))
+		 || !(h_inode->i_mode & 0111))))
 		goto out;
 
 	/*
 	 * - skip the lower fs test in the case of write to ro branch.
 	 * - nfs dir permission write check is optimized, but a policy for
 	 *   link/rename requires a real check.
-	 * - nfs always sets MS_POSIXACL regardless its mount option 'noacl.'
+	 * - nfs always sets SB_POSIXACL regardless its mount option 'noacl.'
 	 *   in this case, generic_permission() returns -EOPNOTSUPP.
 	 */
 	if ((write_mask && !au_br_writable(brperm))
@@ -54,7 +56,7 @@ static int h_permission(struct inode *h_inode, int mask,
 		&& write_mask && !(mask & MAY_READ))
 	    || !h_inode->i_op->permission) {
 		/* AuLabel(generic_permission); */
-		/* AuDbg("get_acl %pf\n", h_inode->i_op->get_acl); */
+		/* AuDbg("get_acl %ps\n", h_inode->i_op->get_acl); */
 		err = generic_permission(h_inode, mask);
 		if (err == -EOPNOTSUPP && au_test_nfs_noacl(h_inode))
 			err = h_inode->i_op->permission(h_inode, mask);
@@ -69,19 +71,6 @@ static int h_permission(struct inode *h_inode, int mask,
 		err = devcgroup_inode_permission(h_inode, mask);
 	if (!err)
 		err = security_inode_permission(h_inode, mask);
-
-#if 0
-	if (!err) {
-		/* todo: do we need to call ima_path_check()? */
-		struct path h_path = {
-			.dentry	=
-			.mnt	= h_mnt
-		};
-		err = ima_path_check(&h_path,
-				     mask & (MAY_READ | MAY_WRITE | MAY_EXEC),
-				     IMA_COUNT_LEAVE);
-	}
-#endif
 
 out:
 	return err;
@@ -104,7 +93,13 @@ static int aufs_permission(struct inode *inode, int mask)
 	sb = inode->i_sb;
 	si_read_lock(sb, AuLock_FLUSH);
 	ii_read_lock_child(inode);
-#if 0
+#if 0 /* reserved for future use */
+	/*
+	 * This test may be rather 'too much' since the test is essentially done
+	 * in the aufs_lookup().  Theoretically it is possible that the inode
+	 * generation doesn't match to the superblock's here.  But it isn't a
+	 * big deal I suppose.
+	 */
 	err = au_iigen_test(inode, au_sigen(sb));
 	if (unlikely(err))
 		goto out;
@@ -222,7 +217,7 @@ static struct dentry *aufs_lookup(struct inode *dir, struct dentry *dentry,
 	if (inode)
 		atomic_inc(&inode->i_count);
 	ret = d_splice_alias(inode, dentry);
-#if 0
+#if 0 /* reserved for future use */
 	if (unlikely(d_need_lookup(dentry))) {
 		spin_lock(&dentry->d_lock);
 		dentry->d_flags &= ~DCACHE_NEED_LOOKUP;
@@ -251,45 +246,100 @@ out:
 
 /* ---------------------------------------------------------------------- */
 
+/*
+ * very dirty and complicated aufs ->atomic_open().
+ * aufs_atomic_open()
+ * + au_aopen_or_create()
+ *   + add_simple()
+ *     + vfsub_atomic_open()
+ *       + branch fs ->atomic_open()
+ *	   may call the actual 'open' for h_file
+ *       + inc br_nfiles only if opened
+ * + au_aopen_no_open() or au_aopen_do_open()
+ *
+ * au_aopen_do_open()
+ * + finish_open()
+ *   + au_do_aopen()
+ *     + au_do_open() the body of all 'open'
+ *       + au_do_open_nondir()
+ *	   set the passed h_file
+ *
+ * au_aopen_no_open()
+ * + finish_no_open()
+ */
+
 struct aopen_node {
-	struct hlist_node hlist;
+	struct hlist_bl_node hblist;
 	struct file *file, *h_file;
 };
 
 static int au_do_aopen(struct inode *inode, struct file *file)
 {
-	struct au_sphlhead *aopen;
+	struct hlist_bl_head *aopen;
+	struct hlist_bl_node *pos;
 	struct aopen_node *node;
 	struct au_do_open_args args = {
-		.no_lock	= 1,
-		.open		= au_do_open_nondir
+		.aopen	= 1,
+		.open	= au_do_open_nondir
 	};
 
 	aopen = &au_sbi(inode->i_sb)->si_aopen;
-	spin_lock(&aopen->spin);
-	hlist_for_each_entry(node, &aopen->head, hlist)
+	hlist_bl_lock(aopen);
+	hlist_bl_for_each_entry(node, pos, aopen, hblist)
 		if (node->file == file) {
 			args.h_file = node->h_file;
 			break;
 		}
-	spin_unlock(&aopen->spin);
+	hlist_bl_unlock(aopen);
 	/* AuDebugOn(!args.h_file); */
 
 	return au_do_open(file, &args);
 }
 
+static int au_aopen_do_open(struct file *file, struct dentry *dentry,
+			    struct aopen_node *aopen_node)
+{
+	int err;
+	struct hlist_bl_head *aopen;
+
+	AuLabel(here);
+	aopen = &au_sbi(dentry->d_sb)->si_aopen;
+	au_hbl_add(&aopen_node->hblist, aopen);
+	err = finish_open(file, dentry, au_do_aopen);
+	au_hbl_del(&aopen_node->hblist, aopen);
+	/* AuDbgFile(file); */
+	AuDbg("%pd%s%s\n", dentry,
+	      (file->f_mode & FMODE_CREATED) ? " created" : "",
+	      (file->f_mode & FMODE_OPENED) ? " opened" : "");
+
+	AuTraceErr(err);
+	return err;
+}
+
+static int au_aopen_no_open(struct file *file, struct dentry *dentry)
+{
+	int err;
+
+	AuLabel(here);
+	dget(dentry);
+	err = finish_no_open(file, dentry);
+
+	AuTraceErr(err);
+	return err;
+}
+
 static int aufs_atomic_open(struct inode *dir, struct dentry *dentry,
 			    struct file *file, unsigned int open_flag,
-			    umode_t create_mode, int *opened)
+			    umode_t create_mode)
 {
-	int err, h_opened = *opened;
+	int err, did_open;
 	unsigned int lkup_flags;
+	aufs_bindex_t bindex;
+	struct super_block *sb;
 	struct dentry *parent, *d;
-	struct au_sphlhead *aopen;
 	struct vfsub_aopen_args args = {
 		.open_flag	= open_flag,
-		.create_mode	= create_mode,
-		.opened		= &h_opened
+		.create_mode	= create_mode
 	};
 	struct aopen_node aopen_node = {
 		.file	= file
@@ -324,74 +374,73 @@ static int aufs_atomic_open(struct inode *dir, struct dentry *dentry,
 	if (d_is_positive(dentry)
 	    || d_unhashed(dentry)
 	    || d_unlinked(dentry)
-	    || !(open_flag & O_CREAT))
-		goto out_no_open;
+	    || !(open_flag & O_CREAT)) {
+		err = au_aopen_no_open(file, dentry);
+		goto out; /* success */
+	}
 
 	err = aufs_read_lock(dentry, AuLock_DW | AuLock_FLUSH | AuLock_GEN);
 	if (unlikely(err))
 		goto out;
 
+	sb = dentry->d_sb;
 	parent = dentry->d_parent;	/* dir is locked */
 	di_write_lock_parent(parent);
 	err = au_lkup_dentry(dentry, /*btop*/0, AuLkup_ALLOW_NEG);
-	if (unlikely(err))
-		goto out_unlock;
+	if (unlikely(err < 0))
+		goto out_parent;
 
 	AuDbgDentry(dentry);
-	if (d_is_positive(dentry))
-		goto out_unlock;
+	if (d_is_positive(dentry)) {
+		err = au_aopen_no_open(file, dentry);
+		goto out_parent; /* success */
+	}
 
-	args.file = get_empty_filp();
+	args.file = alloc_empty_file(file->f_flags, current_cred());
 	err = PTR_ERR(args.file);
 	if (IS_ERR(args.file))
-		goto out_unlock;
+		goto out_parent;
 
-	args.file->f_flags = file->f_flags;
+	bindex = au_dbtop(dentry);
 	err = au_aopen_or_create(dir, dentry, &args);
 	AuTraceErr(err);
 	AuDbgFile(args.file);
-	if (unlikely(err < 0)) {
-		if (h_opened & FILE_OPENED)
-			fput(args.file);
-		else
-			put_filp(args.file);
-		goto out_unlock;
-	}
-
-	/* some filesystems don't set FILE_CREATED while succeeded? */
-	*opened |= FILE_CREATED;
-	if (h_opened & FILE_OPENED)
-		aopen_node.h_file = args.file;
-	else {
-		put_filp(args.file);
+	file->f_mode = args.file->f_mode & ~FMODE_OPENED;
+	did_open = !!(args.file->f_mode & FMODE_OPENED);
+	if (!did_open) {
+		fput(args.file);
 		args.file = NULL;
 	}
-	aopen = &au_sbi(dir->i_sb)->si_aopen;
-	au_sphl_add(&aopen_node.hlist, aopen);
-	err = finish_open(file, dentry, au_do_aopen, opened);
-	au_sphl_del(&aopen_node.hlist, aopen);
+	di_write_unlock(parent);
+	di_write_unlock(dentry);
+	if (unlikely(err < 0)) {
+		if (args.file)
+			fput(args.file);
+		goto out_sb;
+	}
+
+	if (!did_open)
+		err = au_aopen_no_open(file, dentry);
+	else {
+		aopen_node.h_file = args.file;
+		err = au_aopen_do_open(file, dentry, &aopen_node);
+	}
+	if (unlikely(err < 0)) {
+		if (args.file)
+			fput(args.file);
+		if (did_open)
+			au_lcnt_dec(&args.br->br_nfiles);
+	}
+	goto out_sb; /* success */
+
+out_parent:
+	di_write_unlock(parent);
+	di_write_unlock(dentry);
+out_sb:
+	si_read_unlock(sb);
+out:
 	AuTraceErr(err);
 	AuDbgFile(file);
-	if (aopen_node.h_file)
-		fput(aopen_node.h_file);
-
-out_unlock:
-	di_write_unlock(parent);
-	aufs_read_unlock(dentry, AuLock_DW);
-	AuDbgDentry(dentry);
-	if (unlikely(err < 0))
-		goto out;
-out_no_open:
-	if (err >= 0 && !(*opened & FILE_CREATED)) {
-		AuLabel(out_no_open);
-		dget(dentry);
-		err = finish_no_open(file, dentry);
-	}
-out:
-	AuDbg("%pd%s%s\n", dentry,
-	      (*opened & FILE_CREATED) ? " created" : "",
-	      (*opened & FILE_OPENED) ? " opened" : "");
-	AuTraceErr(err);
 	return err;
 }
 
@@ -423,10 +472,10 @@ static int au_wr_dir_cpup(struct dentry *dentry, struct dentry *parent,
 	if (!err && add_entry && !au_ftest_wrdir(add_entry, TMPFILE)) {
 		h_parent = au_h_dptr(parent, bcpup);
 		h_dir = d_inode(h_parent);
-		inode_lock_nested(h_dir, AuLsc_I_PARENT);
+		inode_lock_shared_nested(h_dir, AuLsc_I_PARENT);
 		err = au_lkup_neg(dentry, bcpup, /*wh*/0);
 		/* todo: no unlock here */
-		inode_unlock(h_dir);
+		inode_unlock_shared(h_dir);
 
 		AuDbg("bcpup %d\n", bcpup);
 		if (!err) {
@@ -584,7 +633,8 @@ out:
 
 static void au_pin_hdir_set_owner(struct au_pin *p, struct task_struct *task)
 {
-#if !defined(CONFIG_RWSEM_GENERIC_SPINLOCK) && defined(CONFIG_RWSEM_SPIN_ON_OWNER)
+#if !defined(CONFIG_RWSEM_GENERIC_SPINLOCK) \
+	&& defined(CONFIG_RWSEM_SPIN_ON_OWNER)
 	p->hdir->hi_inode->i_rwsem.owner = task;
 #endif
 }
@@ -810,10 +860,10 @@ int au_pin_and_icpup(struct dentry *dentry, struct iattr *ia,
 	a->h_path.dentry = au_h_dptr(dentry, btop);
 	a->h_inode = d_inode(a->h_path.dentry);
 	if (ia && (ia->ia_valid & ATTR_SIZE)) {
-		inode_lock_nested(a->h_inode, AuLsc_I_CHILD);
+		inode_lock_shared_nested(a->h_inode, AuLsc_I_CHILD);
 		if (ia->ia_size < i_size_read(a->h_inode))
 			sz = ia->ia_size;
-		inode_unlock(a->h_inode);
+		inode_unlock_shared(a->h_inode);
 	}
 
 	hi_wh = NULL;
@@ -1001,7 +1051,7 @@ out_dentry:
 out_si:
 	si_read_unlock(sb);
 out_kfree:
-	kfree(a);
+	au_kfree_rcu(a);
 out:
 	AuTraceErr(err);
 	return err;
@@ -1092,7 +1142,7 @@ out_di:
 	di_write_unlock(dentry);
 	si_read_unlock(sb);
 out_kfree:
-	kfree(a);
+	au_kfree_rcu(a);
 out:
 	AuTraceErr(err);
 	return err;
@@ -1302,7 +1352,7 @@ static const char *aufs_get_link(struct dentry *dentry, struct inode *inode,
 		goto out_unlock;
 
 	err = 0;
-	AuDbg("%pf\n", h_inode->i_op->get_link);
+	AuDbg("%ps\n", h_inode->i_op->get_link);
 	AuDbgDentry(h_dentry);
 	ret = vfs_get_link(h_dentry, done);
 	dput(h_dentry);
@@ -1325,7 +1375,8 @@ static int au_is_special(struct inode *inode)
 	return (inode->i_mode & (S_IFBLK | S_IFCHR | S_IFIFO | S_IFSOCK));
 }
 
-static int aufs_update_time(struct inode *inode, struct timespec *ts, int flags)
+static int aufs_update_time(struct inode *inode, struct timespec64 *ts,
+			    int flags)
 {
 	int err;
 	aufs_bindex_t bindex;
@@ -1341,7 +1392,6 @@ static int aufs_update_time(struct inode *inode, struct timespec *ts, int flags)
 	lockdep_off();
 	si_read_lock(sb, AuLock_FLUSH);
 	ii_write_lock_child(inode);
-	lockdep_on();
 
 	err = 0;
 	bindex = au_ibtop(inode);
@@ -1369,7 +1419,6 @@ static int aufs_update_time(struct inode *inode, struct timespec *ts, int flags)
 		AuDebugOn(1);
 	}
 
-	lockdep_off();
 	if (!err)
 		au_cpup_attr_timesizes(inode);
 	ii_write_unlock(inode);
