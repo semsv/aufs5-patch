@@ -634,6 +634,10 @@ out:
 static void au_pin_hdir_set_owner(struct au_pin *p, struct task_struct *task)
 {
 	/* Структура au_pin описана в fs/aufs/inode.h */
+	/* в этой структуре поле hi_inode имеет тип структуры inode описанной в linux/fs.h */
+	/* далее в полях этой структуры есть поле i_rwsem которое имеет тип структуры rw_semaphore */
+	/* структура rw_semaphore описана в include/linux/rwsem.h */
+	/* поле owner имеет тип atomic_long_t */
 	atomic_long_set(&p->hdir->hi_inode->i_rwsem.owner, (long)task);
 }
 
