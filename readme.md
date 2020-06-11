@@ -4,7 +4,9 @@
 *-------------------------------------------*
 
   Aufs4 -- advanced multi layered unification filesystem version 4.x
+  
   http://aufs.sf.net
+  
   Junjiro R. Okajima
 
 *-------------------------------------------*
