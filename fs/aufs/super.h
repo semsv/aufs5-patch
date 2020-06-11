@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2005-2019 Junjiro R. Okajima
+ * Copyright (C) 2005-2020 Junjiro R. Okajima
  *
  * This program, aufs is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -438,7 +438,7 @@ static inline void dbgaufs_si_null(struct au_sbinfo *sbinfo)
 
 /* current->atomic_flags */
 /* this value should never corrupt the ones defined in linux/sched.h */
-#define PFA_AUFS	7
+#define PFA_AUFS	0x10
 
 TASK_PFA_TEST(AUFS, test_aufs)	/* task_test_aufs */
 TASK_PFA_SET(AUFS, aufs)	/* task_set_aufs */

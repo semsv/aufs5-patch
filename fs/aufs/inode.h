@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2005-2019 Junjiro R. Okajima
+ * Copyright (C) 2005-2020 Junjiro R. Okajima
  *
  * This program, aufs is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -207,8 +207,8 @@ struct au_icpup_args {
 int au_pin_and_icpup(struct dentry *dentry, struct iattr *ia,
 		     struct au_icpup_args *a);
 
-int au_h_path_getattr(struct dentry *dentry, int force, struct path *h_path,
-		      int locked);
+int au_h_path_getattr(struct dentry *dentry, struct inode *inode, int force,
+		      struct path *h_path, int locked);
 
 /* i_op_add.c */
 int au_may_add(struct dentry *dentry, aufs_bindex_t bindex,
@@ -613,7 +613,7 @@ void au_hn_free(struct au_hinode *hinode);
 void au_hn_ctl(struct au_hinode *hinode, int do_set);
 void au_hn_reset(struct inode *inode, unsigned int flags);
 int au_hnotify(struct inode *h_dir, struct au_hnotify *hnotify, u32 mask,
-	       struct qstr *h_child_qstr, struct inode *h_child_inode);
+	       const struct qstr *h_child_qstr, struct inode *h_child_inode);
 int au_hnotify_reset_br(unsigned int udba, struct au_branch *br, int perm);
 int au_hnotify_init_br(struct au_branch *br, int perm);
 void au_hnotify_fin_br(struct au_branch *br);

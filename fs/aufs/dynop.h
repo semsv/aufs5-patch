@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2010-2019 Junjiro R. Okajima
+ * Copyright (C) 2010-2020 Junjiro R. Okajima
  *
  * This program, aufs is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -57,6 +57,8 @@ struct au_dyaop {
 	struct au_dykey			da_key;
 	struct address_space_operations	da_op; /* not const */
 };
+/* make sure that 'struct au_dykey *' can be any type */
+static_assert(!offsetof(struct au_dyaop, da_key));
 
 /* ---------------------------------------------------------------------- */
 

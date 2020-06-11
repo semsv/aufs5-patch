@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2017-2019 Junjiro R. Okajima
+ * Copyright (C) 2017-2020 Junjiro R. Okajima
  *
  * This program, aufs is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -584,7 +584,7 @@ struct au_drinfo_rev_elm {
 struct au_drinfo_rev {
 	unsigned char			already;
 	aufs_bindex_t			nelm;
-	struct au_drinfo_rev_elm	elm[0];
+	struct au_drinfo_rev_elm	elm[];
 };
 
 /* todo: isn't it too large? */

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2019 Junjiro R. Okajima
+ * Copyright (C) 2005-2020 Junjiro R. Okajima
  *
  * This program, aufs is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -205,7 +205,7 @@ static void au_wkq_lockdep_post(struct au_wkinfo *wkinfo)
 	if (!hl)
 		return;
 	while ((p = *hl++)) /* assignment */
-		rwsem_release(p->instance, 0, /*p->acquire_ip*/_RET_IP_);
+		rwsem_release(p->instance, /*p->acquire_ip*/_RET_IP_);
 }
 #endif
 

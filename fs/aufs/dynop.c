@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2010-2019 Junjiro R. Okajima
+ * Copyright (C) 2010-2020 Junjiro R. Okajima
  *
  * This program, aufs is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -353,9 +353,6 @@ void au_dy_arefresh(int do_dx)
 void __init au_dy_init(void)
 {
 	int i;
-
-	/* make sure that 'struct au_dykey *' can be any type */
-	BUILD_BUG_ON(offsetof(struct au_dyaop, da_key));
 
 	for (i = 0; i < AuDyLast; i++)
 		INIT_HLIST_BL_HEAD(dynop + i);
