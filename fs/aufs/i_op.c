@@ -633,6 +633,7 @@ out:
 
 static void au_pin_hdir_set_owner(struct au_pin *p, struct task_struct *task)
 {
+	/* Структура au_pin описана в fs/aufs/inode.h */
 	atomic_long_set(&p->hdir->hi_inode->i_rwsem.owner, (long)task);
 }
 
