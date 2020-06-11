@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2019 Junjiro R. Okajima
+ * Copyright (C) 2005-2020 Junjiro R. Okajima
  *
  * This program, aufs is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -168,7 +168,6 @@ static int au_hfsn_handle_event(struct fsnotify_group *group,
 	int err;
 	struct au_hnotify *hnotify;
 	struct inode *h_dir, *h_inode;
-	struct qstr *h_child_qstr = file_name;
 	struct fsnotify_mark *inode_mark;
 
 	AuDebugOn(data_type != FSNOTIFY_EVENT_INODE);
@@ -196,7 +195,7 @@ static int au_hfsn_handle_event(struct fsnotify_group *group,
 	inode_mark = fsnotify_iter_inode_mark(iter_info);
 	AuDebugOn(!inode_mark);
 	hnotify = container_of(inode_mark, struct au_hnotify, hn_mark);
-	err = au_hnotify(h_dir, hnotify, mask, h_child_qstr, h_inode);
+	err = au_hnotify(h_dir, hnotify, mask, file_name, h_inode);
 
 out:
 	return err;
