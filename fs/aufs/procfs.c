@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2010-2019 Junjiro R. Okajima
+ * Copyright (C) 2010-2020 Junjiro R. Okajima
  *
  * This program, aufs is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -129,10 +129,9 @@ out:
 	return err;
 }
 
-static const struct proc_ops au_procfs_plm_fop = {
+static const struct proc_ops au_procfs_plm_op = {
 	.proc_write	= au_procfs_plm_write,
-	.proc_release	= au_procfs_plm_release,
-	//.owner		= THIS_MODULE
+	.proc_release	= au_procfs_plm_release
 };
 
 /* ---------------------------------------------------------------------- */
@@ -156,7 +155,7 @@ int __init au_procfs_init(void)
 		goto out;
 
 	entry = proc_create(AUFS_PLINK_MAINT_NAME, S_IFREG | 0200,
-			    au_procfs_dir, &au_procfs_plm_fop);
+			    au_procfs_dir, &au_procfs_plm_op);
 	if (unlikely(!entry))
 		goto out_dir;
 
