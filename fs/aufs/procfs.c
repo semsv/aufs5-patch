@@ -128,7 +128,9 @@ out_success:
 out:
 	return err;
 }
-
+/*
+  Структура proc_ops описана в include/linux/proc_fs.h
+*/
 static const struct proc_ops au_procfs_plm_op = {
 	.proc_write	= au_procfs_plm_write,
 	.proc_release	= au_procfs_plm_release
